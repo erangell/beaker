@@ -3,8 +3,8 @@
   "name": "beakerbrowser",
   "devDependencies": {
     "browserify": "^13.0.1",
-    "electron": "3.0.9",
-    "electron-builder": "~20.8.0",
+    "electron": "5.0.0",
+    "electron-builder": "~20.38.5",
     "eslint": "^4.5.0",
     "eslint-plugin-import": "^2.7.0",
     "eslint-plugin-node": "^5.1.1",
@@ -31,9 +31,11 @@
     "appId": "com.pfrazee.beaker-browser",
     "asar": true,
     "asarUnpack": [
+      "./markdown-renderer.build.js",
+      "./json-renderer.build.js",
       "./node_modules/sodium-native/**"
     ],
-    "copyright": "© 2018, Blue Link Labs",
+    "copyright": "© 2019, Blue Link Labs",
     "npmRebuild": false,
     "protocols": [
       {
@@ -72,7 +74,7 @@
     "postinstall": "cd app && npm install",
     "build": "gulp build",
     "burnthemall": "node ./tasks/burnthemall.js",
-    "lint": "eslint --ignore-pattern 'color-thief.js' --ignore-pattern 'app/node_modules' --ignore-pattern '*.build.js' --ignore-pattern 'assets' --fix app",
+    "lint": "eslint --ignore-pattern 'color-thief.js' --ignore-pattern 'app/node_modules' --ignore-pattern 'app/vendor' --ignore-pattern '*.build.js' --ignore-pattern 'assets' --fix app",
     "rebuild": "gulp rebuild",
     "release": "npm run build && build -p never && gulp postbuild",
     "start": "gulp start",

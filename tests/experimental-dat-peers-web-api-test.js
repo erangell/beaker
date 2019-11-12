@@ -25,6 +25,8 @@ const app2 = browserdriver.start({
   }
 })
 var createdDatUrl
+var startPageTab1
+var startPageTab2
 var mainTab1
 var mainTab2
 
@@ -32,23 +34,41 @@ test.before(async t => {
   console.log('starting experimental-dat-peers-web-api-test')
   await app1.isReady
   await app2.isReady
+  startPageTab1 = app1.getTab(0)
+  startPageTab2 = app2.getTab(0)
 
   // create the test archive
-  var res = await app1.executeJavascript(`
+  var res = await startPageTab1.executeJavascript(`
     DatArchive.create({title: 'Test Archive', description: 'Foo', prompt: false})
   `)
   createdDatUrl = res.url
 
   // go to the site
-  mainTab1 = app1.getTab(0)
+  mainTab1 = await app1.newTab()
   await mainTab1.navigateTo(createdDatUrl)
-  mainTab2 = app2.getTab(0)
+  mainTab2 = await app2.newTab()
   await mainTab2.navigateTo(createdDatUrl)
 })
 test.after.always('cleanup', async t => {
   await app1.stop()
   await app2.stop()
 })
+
+function enableExperimentalDatPeersInDatJson (tab, createdDatUrl) {
+  return tab.executeJavascript(`
+    (async function () {
+      try {
+        var archive = new DatArchive("${createdDatUrl}")
+        var manifest = JSON.parse(await archive.readFile('dat.json', 'utf8'))
+        manifest.experimental = {apis: ['datPeers']}
+        await archive.writeFile('dat.json', JSON.stringify(manifest), 'utf8')
+      } catch (e) {
+        return e
+      }
+      return archive.readFile('dat.json', 'utf8')
+    })()
+  `)
+}
 
 // tests
 //
@@ -64,24 +84,11 @@ test('experiment must be opted into', async t => {
     t.is(e.name, 'PermissionsError')
   }
 
-  // update manifest to include experiment
-  await app1.executeJavascript(`
-    (async function () {
-      try {
-        var archive = new DatArchive("${createdDatUrl}")
-        var manifest = JSON.parse(await archive.readFile('dat.json', 'utf8'))
-        manifest.experimental = {apis: ['datPeers']}
-        await archive.writeFile('dat.json', JSON.stringify(manifest), 'utf8')
-      } catch (e) {
-        return e
-      }
-      return archive.readFile('dat.json', 'utf8')
-    })()
-  `)
+  await enableExperimentalDatPeersInDatJson(startPageTab1, createdDatUrl)
 
   // make sure the change has made it to browser 2
   await new Promise(resolve => setTimeout(resolve, 1e3))
-  var manifest = await app2.executeJavascript(`
+  var manifest = await startPageTab2.executeJavascript(`
     (async function () {
       var archive = new DatArchive("${createdDatUrl}")
       await archive.download('/dat.json')
@@ -132,6 +139,26 @@ test('datPeers.list() and datPeers.get()', async t => {
   t.is(peer2.id, peers2[0].id)
   t.is(typeof peer2.userData, 'undefined')
   t.is(peer2.send, 'function')
+})
+
+test('datPeers.getOwnPeerId()', async t => {
+  const listPeersCode = `
+    (async function () {
+      var peers = await experimental.datPeers.list()
+      return peers
+        .map(p => ({id: p.id, userData: p.userData, send: typeof p.send}))
+        .filter(p => !!p.id)
+    })()
+  `
+  const getOwnPeerIdCode = `
+    (function () {
+      return experimental.datPeers.getOwnPeerId()
+    })()
+  `
+  await enableExperimentalDatPeersInDatJson(startPageTab1, createdDatUrl)
+  const peersList = await mainTab1.executeJavascript(listPeersCode)
+  const ownId = await mainTab2.executeJavascript(getOwnPeerIdCode)
+  t.is(peersList[0].id, ownId)
 })
 
 test('datPeers.broadcast() and datPeers.send()', async t => {

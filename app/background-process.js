@@ -14,19 +14,18 @@ import * as rpc from 'pauls-electron-rpc'
 import * as beakerBrowser from './background-process/browser'
 import * as adblocker from './background-process/adblocker'
 import * as analytics from './background-process/analytics'
+import * as portForwarder from './background-process/nat-port-forwarder'
 
 import * as windows from './background-process/ui/windows'
-import * as modals from './background-process/ui/modals'
+import * as modals from './background-process/ui/subwindows/modals'
 import * as windowMenu from './background-process/ui/window-menu'
 import registerContextMenu from './background-process/ui/context-menu'
 import * as downloads from './background-process/ui/downloads'
 import * as permissions from './background-process/ui/permissions'
-import * as basicAuth from './background-process/ui/basic-auth'
-import * as hiddenWindows from './background-process/hidden-windows'
+import * as childProcesses from './background-process/child-processes'
 
 import * as beakerProtocol from './background-process/protocols/beaker'
 import * as beakerFaviconProtocol from './background-process/protocols/beaker-favicon'
-import * as beakerHiddenWindowProtocol from './background-process/protocols/beaker-hidden-window'
 
 import * as testDriver from './background-process/test-driver'
 import * as openURL from './background-process/open-url'
@@ -55,11 +54,13 @@ if (beakerCore.getEnvVar('BEAKER_TEST_DRIVER')) {
 }
 
 // enable the sandbox
-// TODO when electron@4.0.0 lands, change to enableSandbox
-app.enableMixedSandbox()
+app.enableSandbox()
 
 // configure the protocols
-protocol.registerStandardSchemes(['dat', 'beaker', 'beaker-hidden-window'], { secure: true })
+protocol.registerSchemesAsPrivileged([
+  {scheme: 'dat', privileges: {standard: true, secure: true, allowServiceWorkers: true, supportFetchAPI: true, corsEnabled: true}},
+  {scheme: 'beaker', privileges: {standard: true, secure: true, allowServiceWorkers: true, supportFetchAPI: true, corsEnabled: true}}
+])
 
 // handle OS event to open URLs
 app.on('open-url', (e, url) => {
@@ -79,8 +80,9 @@ app.on('open-file', (e, filepath) => {
 
 app.on('ready', async function () {
   // start the daemon process
-  beakerHiddenWindowProtocol.setup()
-  var datDaemonWindow = await hiddenWindows.spawn('dat-daemon', './dat-daemon.js')
+  var datDaemonProcess = await childProcesses.spawn('dat-daemon', './dat-daemon.js')
+
+  portForwarder.setup()
 
   // setup core
   await beakerCore.setup({
@@ -93,13 +95,13 @@ app.on('ready', async function () {
     // APIs
     permsAPI: permissions,
     uiAPI: {
-      showModal: modals.showShellModal,
+      showModal: modals.create,
       capturePage: beakerBrowser.capturePage
     },
     rpcAPI: rpc,
     downloadsWebAPI: downloads.WEBAPI,
     browserWebAPI: beakerBrowser.WEBAPI,
-    datDaemonWc: datDaemonWindow.webContents
+    datDaemonProcess
   })
 
   // base
@@ -111,10 +113,8 @@ app.on('ready', async function () {
   windowMenu.setup()
   registerContextMenu()
   windows.setup()
-  modals.setup()
   downloads.setup()
   permissions.setup()
-  basicAuth.setup()
 
   // protocols
   beakerProtocol.setup()
@@ -125,9 +125,11 @@ app.on('ready', async function () {
       throw new Error('Failed to create protocol: dat')
     }
   })
+})
 
-  // configure chromium's permissions for the protocols
-  protocol.registerServiceWorkerSchemes(['dat'])
+app.on('quit', () => {
+  portForwarder.closePort()
+  childProcesses.closeAll()
 })
 
 app.on('custom-ready-to-show', () => {
